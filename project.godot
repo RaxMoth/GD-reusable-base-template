@@ -11,12 +11,28 @@ config_version=5
 [application]
 
 config/name="Reusable base template"
+run/main_scene="uid://c4f6o83nq8xnv"
 config/features=PackedStringArray("4.4", "GL Compatibility")
 config/icon="res://icon.svg"
+
+[autoload]
+
+Types="*res://Globals/types.gd"
+Global="*res://Globals/global.gd"
 
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/godot_state_charts/plugin.cfg")
+
+[file_customization]
+
+folder_colors={
+"res://Assets/": "pink",
+"res://Globals/": "orange",
+"res://Ressources/": "green",
+"res://Scenes/": "blue",
+"res://Scripts/": "red"
+}
 
 [rendering]
 
