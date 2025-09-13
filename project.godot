@@ -20,6 +20,11 @@ config/icon="res://icon.svg"
 Types="*res://Globals/types.gd"
 Global="*res://Globals/global.gd"
 
+[display]
+
+window/size/viewport_width=720
+window/size/viewport_height=1280
+
 [editor_plugins]
 
 enabled=PackedStringArray("res://addons/godot_state_charts/plugin.cfg")
