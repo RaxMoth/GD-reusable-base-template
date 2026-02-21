@@ -1,0 +1,60 @@
+[gd_scene load_steps=4 format=3 uid="uid://dhf4m8u5hm00d"]
+
+[ext_resource type="Script" path="res://Scenes/NPCs/Monster/monster_base_class.gd" id="1_lw6jd"]
+[ext_resource type="PackedScene uid="uid://b0dgbdvv2xpq0" path="res://Scenes/NPCs/npc_state_chart.tscn" id="2_2c7m4"]
+
+[sub_resource type="CircleShape2D" id="1_5i3nb"]
+radius = 400.0
+
+[sub_resource type="CircleShape2D" id="2_gth4q"]
+radius = 20.0
+
+[node name="MonsterExample" type="Node2D"]
+script = ExtResource("1_lw6jd")
+detection_radius = 500.0
+show_detection_radius = false
+combat_role = 0
+max_health = 200.0
+base_attack_damage = 20.0
+max_stages = 3
+
+[node name="Sprite2D" type="Node2D" parent="."]
+
+[node name="CollisionShape2D" type="CollisionShape2D" parent="Sprite2D"]
+shape = SubResource("2_gth4q")
+
+[node name="AnimatedSprite2D" type="AnimatedSprite2D" parent="Sprite2D"]
+modulate = Color(0.8, 0.2, 0.8, 1)
+scale = Vector2(1.5, 1.5)
+
+[node name="StateChart" parent="." instance=ExtResource("2_2c7m4")]
+unique_name_in_owner = true
+
+[node name="NavigationAgent2D" type="NavigationAgent2D" parent="."]
+unique_name_in_owner = true
+path_desired_distance = 6.0
+target_desired_distance = 4.0
+
+[node name="HealthBar" type="ProgressBar" parent="."]
+unique_name_in_owner = true
+offset_top = -60.0
+offset_bottom = -50.0
+mouse_filter = 2
+max_value = 100.0
+value = 75.0
+
+[node name="DetectionArea" type="Area2D" parent="."]
+unique_name_in_owner = true
+
+[node name="CollisionShape2D2" type="CollisionShape2D" parent="DetectionArea"]
+shape = SubResource("1_5i3nb")
+
+[node name="LVLabel" type="Label" parent="."]
+unique_name_in_owner = true
+offset_top = -80.0
+text = "BOSS"
+horizontal_alignment = 1
+add_to_group("Monster")
+
+[connection signal="area_entered" from="DetectionArea" to="." method="_on_detection_area_area_entered"]
+[connection signal="area_exited" from="DetectionArea" to="." method="_on_detection_area_area_exited"]

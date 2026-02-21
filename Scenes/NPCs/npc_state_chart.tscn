@@ -1,0 +1,55 @@
+[gd_scene load_steps=2 format=3 uid="uid://b0dgbdvv2xpq0"]
+
+[ext_resource type="Script" path="res://addons/godot_state_charts/state_chart.gd" id="1_u8xfq"]
+
+[node name="StateChart" type="Node" node_name_mode=2]
+script = ExtResource("1_u8xfq")
+initial_state = NodePath("Root/Alive/Idle")
+
+[node name="Root" type="Node" parent="."]
+
+[node name="Alive" type="Node" parent="Root"]
+
+[node name="Idle" type="Node" parent="Root/Alive"]
+
+[node name="Approach" type="Node" parent="Root/Alive"]
+
+[node name="Fight" type="Node" parent="Root/Alive"]
+
+[node name="Dead" type="Node" parent="Root"]
+
+[node name="IdleToApproach" type="Node" parent="Root"]
+script = ExtResource("1_u8xfq")
+from_state = NodePath("../Alive/Idle")
+to_state = NodePath("../Alive/Approach")
+event = &"enemie_entered"
+
+[node name="ApproachToFight" type="Node" parent="Root"]
+script = ExtResource("1_u8xfq")
+from_state = NodePath("../Alive/Approach")
+to_state = NodePath("../Alive/Fight")
+event = &"enemy_fight"
+
+[node name="ApproachToIdle" type="Node" parent="Root"]
+script = ExtResource("1_u8xfq")
+from_state = NodePath("../Alive/Approach")
+to_state = NodePath("../Alive/Idle")
+event = &"enemie_exited"
+
+[node name="FightToApproach" type="Node" parent="Root"]
+script = ExtResource("1_u8xfq")
+from_state = NodePath("../Alive/Fight")
+to_state = NodePath("../Alive/Approach")
+event = &"re_approach"
+
+[node name="FightToIdle" type="Node" parent="Root"]
+script = ExtResource("1_u8xfq")
+from_state = NodePath("../Alive/Fight")
+to_state = NodePath("../Alive/Idle")
+event = &"enemie_exited"
+
+[node name="AliveToDead" type="Node" parent="Root"]
+script = ExtResource("1_u8xfq")
+from_state = NodePath("../Alive")
+to_state = NodePath("../Dead")
+event = &"death"
