@@ -2,9 +2,17 @@
 
 ## Project Overview
 
-This is a **Godot 4.5** reusable base template targeting **mobile games exclusively**. The rendering method is `mobile` (GL Compatibility). The viewport is `720×1280` (portrait-first). Every architectural decision must reflect that this will run on low-to-mid-range Android and iOS devices.
+This is a **Godot 4.5+** reusable base template targeting **2D mobile games**
+(also exports to Web/desktop). The renderer is **GL Compatibility** for the widest
+Android/iOS device support. The viewport is `720×1280` portrait with
+`canvas_items` stretch and `expand` aspect. Every architectural decision must
+reflect that this runs on low-to-mid-range Android and iOS devices.
 
-This is not a prototype. This is a production-quality, scalable, and maintainable template. There are no shortcuts, no quick hacks, no throwaway variables. Every system must be designed to be extended cleanly by future developers.
+This is not a prototype. It is a production-quality, scalable, maintainable
+template: no shortcuts, no quick hacks, no throwaway variables. Every system is
+designed to be extended cleanly by future developers. See
+[SYSTEMS.md](SYSTEMS.md) for the API and [GETTING_STARTED.md](GETTING_STARTED.md)
+for starting a new game.
 
 ---
 
@@ -12,254 +20,236 @@ This is not a prototype. This is a production-quality, scalable, and maintainabl
 
 ```
 res://
-├── Assets/          # Textures, audio, fonts, animations (read-only at runtime)
-├── Globals/         # Autoloads only — Types and Global
-├── Ressources/      # .tres / .res custom resources (data containers)
-├── Scenes/          # Scene tree (.tscn) organized by domain
-│   ├── NPCs/
-│   │   ├── Hero/
-│   │   ├── Mobs/
-│   │   └── Monster/
-│   └── World/
-├── Scripts/         # Standalone .gd scripts not attached to a scene node
+├── Assets/          # Textures, audio, fonts, themes, icons, localization (read-only at runtime)
+├── Docs/            # Documentation
+├── Globals/         # Autoloads ONLY (scripts, plus scenes for UI / SceneManager / Debug)
+├── Ressources/      # .tres data instances (game_config, levels, upgrades...)
+├── Scenes/          # .tscn files by domain; .gd here only if attached to a scene in the same folder
+│   ├── Boot/        # Main scene (splash)
+│   ├── Menus/       # MainMenu, LevelSelect, Shop
+│   ├── Game/        # LevelBase — every level inherits it
+│   ├── Entities/    # Reusable gameplay entities (player, enemy, projectile, pickups...)
+│   ├── UI/          # HUD and popups
+│   └── Examples/    # Self-contained example games (deletable per folder)
+├── Scripts/         # Standalone class_name scripts (not tied to one scene)
+│   ├── Components/  # Composable node components
+│   ├── Resources/   # Resource schemas (data definitions)
+│   ├── Profile/     # Persistent player-data modules
+│   ├── Services/    # Ads / store / analytics provider base classes
+│   ├── UI/          # Reusable UI controls
+│   ├── Input/       # Gesture detection
+│   └── Utils/       # Helpers and data structures
+├── Tests/           # Smoke test + screenshot tool (excluded from exports)
 └── addons/
     └── godot_state_charts/   # State chart library — always use this for state management
 ```
 
-Respect the folder color-coding enforced in `project.godot`. Never place files in the wrong directory.
+Respect the folder color-coding in `project.godot`. Never place files in the wrong directory.
 
 ---
 
 ## Core Principles — Non-Negotiable
 
-### 1. Mobile First, Mobile Only
-- Target 60 FPS on mid-range devices (Snapdragon 7xx equivalent).
-- Never use heavy 3D techniques, complex shaders, or CPU-heavy algorithms.
-- All UI must be designed for **touch input** — minimum touch target size is 48×48 dp.
-- Use `CanvasLayer` for all HUD and UI elements so they are independent from the game camera.
-- UI must use **anchors and containers** (`VBoxContainer`, `HBoxContainer`, `MarginContainer`, `AspectRatioContainer`) — never hardcoded pixel positions.
-- Test and design layouts for both tall (19:9) and short (16:9) aspect ratios using `AspectRatioContainer` where necessary.
+### 1. Mobile First
+- Target 60 FPS on mid-range devices (Snapdragon 7xx equivalent); the Battery
+  Saver setting caps at 30 FPS — design for both.
+- No heavy shaders, no CPU-heavy per-frame algorithms, no `SubViewport` unless essential.
+- All UI is designed for **touch** — minimum touch target 48×48 dp (≈ 88 px at 720 wide).
+- HUD/UI lives on `CanvasLayer`s, independent from the game camera.
+- UI uses **anchors and containers** — never hardcoded pixel positions for layout.
+- Every full-screen UI starts with a `SafeAreaContainer` (notches, rounded corners).
+- Layouts must work for tall (20:9) and short (16:9) phones and tablets.
 
 ### 2. Signals over Direct References
-- Nodes must communicate through **signals**, not direct `get_node()` calls or `$` shortcuts.
-- Every signal must have an explicit type annotation in its declaration:
+- Nodes communicate through **signals**; cross-system communication goes through
+  the `Events` bus.
+- Every signal has explicit parameter types:
   ```gdscript
-  signal health_changed(new_health: int, max_health: int)
-  signal enemy_died(enemy_id: StringName)
+  signal health_changed(current_health: float, max_health: float)
   ```
-- Use `connect()` in code only when the connection must be dynamic. For static connections, use the Godot editor signal dock.
-- Never use `call_group()` as a fire-and-forget — prefer typed signals with explicit receivers.
+- Static connections are made in the scene (`[connection]` / signal dock);
+  `connect()` in code only for dynamic connections.
+- Never use `call_group()` as fire-and-forget — use typed signals.
 
 ### 3. State Management via godot_state_charts
-- **All entity state** (NPCs, Hero, UI screens, game flow) must be managed through the `godot_state_charts` addon. No hand-rolled state machines.
-- Every entity that has behavior states must have a `StateChart` node as a child.
-- Use `CompoundState` for hierarchical state nesting (e.g., `Alive > { Idle, Moving, Attacking }`).
-- Use `ParallelState` when two independent state dimensions must coexist (e.g., `Movement` and `Combat` running simultaneously).
-- Use `AtomicState` for leaf states that contain the actual behavior logic.
-- Use `Transition` nodes with guards and events — never call `send_event()` with magic strings scattered across the codebase. Define all event names as `StringName` constants in the relevant class or in `Types`.
-- Connect state signals (`state_entered`, `state_exited`, `state_processing`, `state_physics_processing`) to the owning script's methods. Use `state_physics_processing` for movement/physics, `state_processing` only for non-physics logic.
+- Entity and flow state (player, enemies, level flow) is managed with the
+  `godot_state_charts` addon. No hand-rolled state machines for those.
+- Use `CompoundState` for hierarchy (`Alive > { Idle, Moving }`), `ParallelState`
+  for independent dimensions, `AtomicState` for leaves.
+- Transitions are `Transition` nodes with an `event`. Events are sent only with
+  `Types.EVENT_*` constants — never magic strings in code.
+- Connect `state_entered`, `state_exited`, `state_processing`,
+  `state_physics_processing` to the owner's methods. Movement/physics belongs in
+  `state_physics_processing`.
+- Simple stateless helpers (a tower that always aims, a projectile) may use
+  `_physics_process` directly.
 
 ### 4. Typed GDScript — No Exceptions
-- Every variable, parameter, and return type must be **explicitly typed**:
+- Every variable, parameter, return type and loop variable is explicitly typed
+  (`debug/gdscript/warnings/untyped_declaration` is set to warn):
   ```gdscript
-  # Correct
-  var movement_speed: float = 300.0
-  func apply_damage(damage_amount: int) -> void:
-
-  # Wrong — never do this
-  var speed = 300
-  func apply_damage(dmg):
+  var base_movement_speed: float = 300.0
+  func apply_damage(damage_amount: float) -> void:
+  for enemy: Node2D in nearby_enemies:
   ```
-- Never use `var x`, `var i`, `var n`, or any single-letter or abbreviated variable names.
-- Names must be descriptive and self-documenting. A future developer must understand the purpose of a variable without a comment:
-  ```gdscript
-  # Wrong
-  var hp := 100
-  var spd := 5.0
-
-  # Correct
-  var current_health: int = 100
-  var base_movement_speed: float = 5.0
-  ```
-- Use `@export` annotations for all designer-facing values with meaningful groupings using `@export_group` and `@export_subgroup`.
-- Use `const` for compile-time constants and `static var` for class-level shared state when truly needed.
+- Descriptive names only — no `x`, `i`, `hp`, `spd`.
+- Designer-facing values use `@export` with `@export_group`.
+- `const` for compile-time constants; `static var` only for truly shared state.
+- Don't name members after engine members (`priority`, `visible`...) and don't
+  use `class_name`s that may collide with engine classes (Godot 4.7 added a
+  native `VirtualJoystick`, hence `TouchJoystick`).
 
 ### 5. Resource-Driven Data (No Hardcoding)
-- Game data (stats, configuration, tuning) must live in **custom Resource classes** (`.tres` files under `res://Ressources/`).
-- Define resource schemas in `Scripts/` as `class_name SomeDataResource extends Resource`.
-- The Hero, Mobs, and Monsters must each have a corresponding data resource that can be swapped in the editor — not constants baked into scripts.
-- Use `@export` on resource properties so designers can tune values in the Godot editor without touching code.
+- Tunable data lives in custom `Resource` classes (`Scripts/Resources/`) with
+  instances in `Ressources/` or as sub-resources of the scene that owns them.
+- `Ressources/game_config.tres` (`GameConfig.get_default()`) is the single entry
+  point for game-wide data: scenes, currencies, levels, upgrades, products,
+  achievements, daily rewards, energy and ad pacing.
+- Levels read per-level tuning from `LevelData.custom_parameters`.
 
-### 6. Autoloads — Minimal and Purposeful
-Two autoloads exist and their scope must remain tightly controlled:
+### 6. Autoloads — Focused Services
+Autoloads are services with one responsibility each. Current set and why they exist:
 
-**`Global` (`res://Globals/global.gd`)** — Runtime utility singleton.
-- Allowed: scene-tree traversal helpers, group queries, geometry utilities.
-- Not allowed: game state, player data, or anything that could be a signal or a resource.
-- All functions must be stateless helpers. Global must not hold mutable game state.
+| Autoload | Reason it must be global |
+|---|---|
+| `Types` | Shared constants/enums; no state |
+| `Global` | Stateless helpers; **must not hold mutable state** |
+| `Events` | Decoupled cross-system signals |
+| `Platform` | OS notifications (pause/resume/back) arrive at the root |
+| `Settings` | Preferences must apply before any scene loads |
+| `SaveManager` | One owner of the savegame file |
+| `Profile` | Persistent player data shared by every scene |
+| `Audio` | Music must survive scene changes |
+| `Pools` | Pools outlive individual spawners; cleared on scene change |
+| `Analytics`, `Ads`, `Store` | SDK facades must exist once per app |
+| `UI` | Popups/toasts overlay every scene and survive pausing |
+| `SceneManager` | Owns scene swaps and the transition overlay |
+| `Debug` | Developer overlay (removes itself in release builds) |
 
-**`Types` (`res://Globals/types.gd`)** — Enums, constants, and `StringName` event name definitions.
-- Define all game-wide enums here (entity types, damage types, game states, etc.).
-- Define all `StateChart` event name constants here as `StringName`:
-  ```gdscript
-  const EVENT_ENEMY_SPOTTED: StringName = &"enemy_spotted"
-  const EVENT_PLAYER_DIED: StringName = &"player_died"
-  const EVENT_ATTACK_TRIGGERED: StringName = &"attack_triggered"
-  ```
-- Never define magic string events inline in scenes or scripts.
-
-Do not add new autoloads without a documented architectural reason.
+Do not add new autoloads without a documented reason in this table. Prefer a
+`ProfileModule`, a component, a `Resource` or a signal on `Events`.
 
 ---
 
 ## Scene and Script Architecture
 
-### Base Class Pattern
-Each entity category has a base class scene and script. Concrete entities extend these.
+### Levels
+Every playable level/mode is an **inherited scene of
+`Scenes/Game/LevelBase/LevelBase.tscn`** with a script that `extends LevelBase`.
+LevelBase owns the flow StateChart (`Intro → Playing ⇄ Paused → Won | Lost`),
+HUD, pause, results, rewards, saving and analytics. Levels override hooks
+(`_on_level_setup`, `_on_level_started`, `_level_physics_process`, ...) and call
+`add_score()`, `win()`, `lose()`, `end_run()`.
 
+### Composition over inheritance
+- Entities are composed of components from `Scripts/Components/`
+  (Health, Hurtbox, Hitbox, Velocity, Targeting, Shooter, Stats...).
+- Components communicate **signals upward, method calls downward**.
+- Components are wired with exported node references in the scene
+  (`HurtboxComponent.health_component`), never `get_parent()`.
+- `Global.find_component(node, ComponentClass)` is allowed for queries on other
+  entities (e.g. targeting reading an enemy's health).
+
+### Entity StateChart layout (recommended)
 ```
-Scenes/NPCs/NPCBaseClass.tscn          ← Abstract base (not instantiated directly)
-Scenes/NPCs/Hero/HeroBaseClass.tscn    ← Extends NPC base for the player
-Scenes/NPCs/Mobs/MobsBaseClass.tscn   ← Extends NPC base for generic mobs
-Scenes/NPCs/Monster/MonsterBaseClass.tscn ← Extends NPC base for boss/special enemies
-```
-
-- Base class scripts define the **interface** (signals, virtual methods, exported properties).
-- Concrete class scripts override virtual methods and fill in specific behavior.
-- Use `## @virtual` doc comments on methods intended to be overridden.
-- Virtual methods in GDScript must call `super()` explicitly where appropriate.
-
-### Node Composition Rules
-- Prefer **composition over inheritance** when adding features to an entity.
-- A complex entity (e.g., Hero) is composed of sub-nodes, each responsible for one system: movement, combat, animation, input.
-- Each sub-node component communicates with the parent via **signals upward** and **method calls downward**.
-- Never let a child node reach up to its parent via `get_parent()` — emit a signal and let the parent connect.
-
-### StateChart Integration per Entity
-
-Every `NPCBaseClass`, `HeroBaseClass`, `MobsBaseClass`, and `MonsterBaseClass` scene **must** include:
-```
-EntityRoot (Node2D)
-├── AnimatedSprite2D
-├── CollisionShape2D (inside Area2D or CharacterBody2D as appropriate)
+EntityRoot (CharacterBody2D / Node2D)
+├── Visual (Sprite / AnimatedSprite2D / PlaceholderShape)
+├── CollisionShape2D
+├── ...components
 └── StateChart
-    └── RootCompoundState
-        ├── AliveState (CompoundState)
-        │   ├── IdleState (AtomicState)
-        │   ├── MovingState (AtomicState)
-        │   └── AttackingState (AtomicState)
-        └── DeadState (AtomicState)
+    └── Root (CompoundState)
+        ├── Alive (CompoundState) { Idle, Moving, Attacking... }
+        └── Dead (AtomicState)    # Dead → Alive on Types.EVENT_RESPAWN for pooled entities
 ```
 
-Transitions between states must be defined as child `Transition` nodes with `event` set to a constant from `Types`.
+### Duck-typed hooks
+Optional methods whose names live in `Types.METHOD_*`:
+`receive_scene_params(params)`, `handle_back() -> bool`,
+`_on_pool_spawned()`, `_on_pool_despawned()`,
+`apply_wave_modifiers(health_multiplier, speed_multiplier)`.
 
 ---
 
 ## Performance Rules
 
-### Physics and Processing
-- All physics logic (movement, collision response) must live in `state_physics_processing` callbacks — **never** in `_process()`.
-- Use `state_processing` only for non-physics state logic (timers, UI updates, animation triggers).
-- Prefer `CharacterBody2D` over `RigidBody2D` for player-controlled and AI-controlled entities.
-- Use `Area2D` for trigger detection (aggro ranges, item pickups, damage zones) — not `CharacterBody2D` overlap callbacks.
-
-### Object Pooling
-- Frequently spawned objects (projectiles, particle bursts, damage numbers) **must** use an object pool.
-- Implement a generic `ObjectPool` class in `Scripts/` that manages pre-allocation and recycling.
-- Never instantiate and `queue_free()` in a hot path (per-frame or per-shot).
-
-### Draw Calls and Batching
-- Sprites belonging to the same entity should share a texture atlas (SpriteFrames referencing an atlas).
-- UI elements in the same `CanvasLayer` should use the same `Theme` resource to enable batching.
-- Avoid `SubViewport` unless strictly necessary — they are expensive on mobile.
-
-### Memory
-- Use `Resource` caching: load resources once with `preload()` at script load time for assets guaranteed to exist.
-- Use `load()` only for optional or runtime-determined assets. Always check for `null`.
-- Release unused resources explicitly when transitioning between major game states (levels, menus).
+- Physics logic in `state_physics_processing` (or `_physics_process` for
+  stateless helpers) — never in `_process`.
+- `CharacterBody2D` for controlled/AI movers; `Area2D` for triggers, hit/hurt boxes, pickups.
+- Anything spawned often (projectiles, pickups, enemies, damage numbers) goes
+  through `Pools.spawn()` / `Pools.despawn()`. Never `instantiate()` +
+  `queue_free()` in a hot path. Pooled scripts reset in `_on_pool_spawned()` and
+  guard callbacks with `Pools.is_in_pool(self)`.
+- Never toggle collision objects inside physics callbacks — defer.
+- Throttle expensive queries (targeting re-evaluates on an interval).
+- Share textures via atlases; UI shares one `Theme` (`Assets/Themes/main_theme.tres`).
+- `preload()` assets that always exist; `load()` optional/runtime ones and null-check.
 
 ---
 
-## UI and HUD Architecture
+## UI Architecture
 
-### Responsiveness
-- All UI scenes must use `Control` nodes with anchors configured for the full-screen safe area.
-- Use `%PercentageContainer` patterns or `AspectRatioContainer` to keep UI proportional across screen sizes.
-- Font sizes must be defined in a shared `Theme` resource — never hardcoded in individual nodes.
-- Never use pixel-perfect layouts that assume a fixed resolution.
-
-### Touch Input
-- All interactive UI elements must have touch-appropriate hit areas.
-- Use `BaseButton` subclasses (`Button`, `TextureButton`) — never roll custom input detection on non-button nodes for UI interactions.
-- Mobile-specific: respond to `_input()` touch events for game-world interactions (tap to move, drag gestures). Do not rely on mouse events.
-
-### Separation of Concerns
-- Game HUD lives in `Scenes/UI/HUD/`.
-- Menus (main menu, pause, settings) live in `Scenes/UI/Menus/`.
-- HUD components emit signals when the player interacts — they never directly call game logic.
+- HUD: `Scenes/UI/HUD/` (used by LevelBase). Popups: `Scenes/UI/Popups/` (extend `BasePopup`).
+  Screens: `Scenes/Menus/`.
+- Open popups with `UI.open_popup(scene, data)` and await `.closed`.
+- HUD and popups emit signals — they never run game logic.
+- Font sizes and colors come from the theme or its type variations — no
+  per-node overrides unless intentional.
+- Game-world touch input uses `_unhandled_input` (or `GestureDetector`), so UI
+  buttons consume their touches first. Touch controls that must live under the
+  HUD (joystick) use `_gui_input` on a lower `CanvasLayer`.
+- Use `BaseButton` subclasses for interactive UI (they get automatic feedback).
 
 ---
 
 ## Code Style and Documentation
 
 ### File Header
-Every `.gd` script must begin with a doc comment describing purpose, signals, and dependencies:
-```gdscript
-## NPC base class providing shared state chart integration, animation bindings,
-## and signal interface for all non-player characters.
-##
-## Signals:
-##   died(entity_id: StringName) — emitted when the entity reaches zero health
-##   state_changed(new_state_name: StringName) — emitted on every state transition
-##
-## Dependencies:
-##   - Types autoload (event name constants)
-##   - godot_state_charts addon
-```
+Every `.gd` script starts with a `##` doc comment: purpose, usage, dependencies.
 
 ### Naming Conventions
 | Element | Convention | Example |
 |---|---|---|
-| Script class | PascalCase | `class_name EnemyBaseController` |
+| Script class | PascalCase | `class_name HealthComponent` |
 | Variables | snake_case, descriptive | `current_movement_direction` |
 | Constants | SCREAMING_SNAKE_CASE | `MAX_ENEMY_AGGRO_RANGE` |
-| Signals | snake_case, past tense | `health_depleted`, `target_acquired` |
+| Signals | snake_case, past tense | `health_changed`, `target_acquired` |
 | Functions | snake_case, verb-first | `calculate_damage_reduction()` |
-| State event names | StringName, SCREAMING_SNAKE | `&"ATTACK_TRIGGERED"` defined in Types |
-| Scene files | PascalCase | `HeroBaseClass.tscn` |
-| Script files | snake_case | `hero_base_class.gd` |
+| StateChart events | `StringName` constants in `Types` | `Types.EVENT_DIED` |
+| Scene files | PascalCase | `TopDownPlayer.tscn` |
+| Script files | snake_case | `top_down_player.gd` |
 
 ### Comments
-- Public API (signals, exported vars, public methods) must have `##` doc comments.
-- Non-obvious logic must have `#` inline comments explaining **why**, not what.
-- Never leave `TODO` comments without an associated issue or a name.
+- Public API (signals, exports, public methods) has `##` doc comments.
+- Inline `#` comments explain **why**, not what.
+- No `TODO` without an owner or issue.
 
 ---
 
 ## What the Agent Must Never Do
 
-- **Never** use `$NodeName` shorthand in scripts — use `@onready var node_reference: NodeType = %UniqueNodeName` with unique names enabled in the scene.
-- **Never** use `get_node("/root/SomeSingleton")` — use the registered autoload names (`Global`, `Types`) directly.
-- **Never** hardcode strings for state event names — always reference `Types.EVENT_*` constants.
-- **Never** put game logic inside the `Global` autoload.
-- **Never** skip static typing, even for loop variables: `for enemy: EnemyBaseController in active_enemies:`.
-- **Never** use `set_process(true/false)` manually — `godot_state_charts` handles processing toggling automatically based on state activity.
-- **Never** create new autoloads for systems that could be a `Resource`, a `Node` in the scene tree, or a signal chain.
-- **Never** place `.gd` files in `Scenes/` that aren't directly attached to a `.tscn` in the same subfolder.
-- **Never** build a hand-rolled state machine when `godot_state_charts` can and should be used.
-- **Never** design for mouse/keyboard first — touch is the primary input device.
+- **Never** use `$NodeName` — use `@onready var node: Type = %UniqueName`.
+- **Never** use `get_node("/root/SomeSingleton")` — use autoload names.
+- **Never** hardcode StateChart event strings in code — use `Types.EVENT_*`.
+- **Never** put game state in `Global`.
+- **Never** skip static typing.
+- **Never** `queue_free()` a pooled node — `Pools.despawn()` it.
+- **Never** create autoloads for things that can be a Resource, component,
+  ProfileModule or `Events` signal.
+- **Never** place `.gd` files in `Scenes/` that aren't attached to a `.tscn` in the
+  same folder (examples may keep their example-only resource scripts with them).
+- **Never** hand-roll a state machine where `godot_state_charts` fits.
+- **Never** design for mouse/keyboard first — touch is primary.
 
 ---
 
 ## Checklist Before Committing Any Change
 
-- [ ] All new variables have explicit types and descriptive names
-- [ ] All new signals have typed parameters
-- [ ] Entity state transitions go through the StateChart with event constants from `Types`
-- [ ] No direct node references that bypass the signal pattern
-- [ ] UI layouts use anchors/containers — no hardcoded positions
-- [ ] New assets are referenced via `preload()` at the top of the script
-- [ ] Physics logic is in `state_physics_processing`, not `_process()`
-- [ ] Frequently spawned objects go through an object pool
-- [ ] New data/configuration lives in a `.tres` resource, not in script constants
-- [ ] Doc comments are written for all public API
+- [ ] All new variables, parameters and loop variables are typed and descriptive
+- [ ] New signals have typed parameters
+- [ ] Entity/flow state goes through a StateChart with `Types.EVENT_*`
+- [ ] Components are wired via exported references, not `get_parent()`
+- [ ] UI uses anchors/containers inside a `SafeAreaContainer`
+- [ ] Frequently spawned objects use `Pools`
+- [ ] New tunable data lives in a Resource / `game_config.tres`
+- [ ] Doc comments on all public API
+- [ ] `godot --headless --fixed-fps 60 res://Tests/SmokeTest.tscn` passes

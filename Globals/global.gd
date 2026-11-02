@@ -1,200 +1,124 @@
+## Stateless runtime helpers: group queries, geometry, spawning roots, timing.
+##
+## Rule: nothing in here may hold mutable game state. If you need state,
+## it belongs in a component, a Resource or one of the service autoloads.
+##
+## Dependencies: Types autoload
 extends Node
 
-func get_node_from_group(group_name: String) -> Node2D:
-	var nodes = get_tree().get_nodes_in_group(group_name)
-	if nodes.is_empty():
-		print("No node found in group : ", group_name)
-		return null
-	return nodes[0] as Node2D
-
-func get_map_from_group(group_name: String) -> TileMapLayer:
-	var maps = get_tree().get_nodes_in_group(group_name)
-	return maps[0] if maps.size() > 0 else null
-
-
-func apply_rotation_and_flip(
-	sprite_node: Node2D,
-	area_node: Node2D,
-	direction: Vector2,
-	jitter_threshold: float = 0.05,
-	side_scroll_flip: bool = false
-) -> void:
-	if direction.length_squared() < jitter_threshold * jitter_threshold:
-		return
-
-	var angle = direction.angle()
-
-	if sprite_node:
-		sprite_node.rotation = angle
-		if side_scroll_flip:
-			sprite_node.scale.x = -1 if direction.x < 0 else 1
-
-	if area_node:
-		area_node.rotation = angle
 # ============================================
-# ANGLE UTILITIES
+# TREE & GROUP QUERIES
 # ============================================
 
-func angle_difference(from: float, to: float) -> float:
-	"""Calculate the shortest angle difference in radians"""
-	var diff = fmod(to - from, TAU)
-	if diff > PI:
-		diff -= TAU
-	elif diff < -PI:
-		diff += TAU
-	return diff
+## Returns the first node in [param group_name] or null.
+func get_first_in_group(group_name: StringName) -> Node:
+	return get_tree().get_first_node_in_group(group_name)
 
-func normalize_angle(angle: float) -> float:
-	"""Normalize angle to -PI to PI range"""
-	var normalized = fmod(angle, TAU)
-	if normalized > PI:
-		normalized -= TAU
-	elif normalized < -PI:
-		normalized += TAU
-	return normalized
 
-func lerp_angle(from: float, to: float, weight: float) -> float:
-	"""Smoothly interpolate between two angles"""
-	var diff = angle_difference(from, to)
-	return from + diff * weight
-
-func angle_to_vector(angle: float) -> Vector2:
-	"""Convert angle to unit vector"""
-	return Vector2(cos(angle), sin(angle))
-
-# ============================================
-# SPATIAL QUERIES - WALL DETECTION
-# ============================================
-
-func is_point_too_close_to_wall(
-	world: World2D,
-	point: Vector2,
-	min_radius: float = 32.0,
-	collision_mask: int = 1,
-	samples: int = 8
-) -> bool:
-	"""Check if a point is too close to any walls"""
-	var space_state = world.direct_space_state
-	
-	for i in range(samples):
-		var angle = i * TAU / samples
-		var offset = Vector2.from_angle(angle) * min_radius
-		var check_point = point + offset
-		
-		var query = PhysicsRayQueryParameters2D.create(point, check_point)
-		query.collision_mask = collision_mask
-		query.collide_with_areas = false
-		query.collide_with_bodies = true
-		
-		var result = space_state.intersect_ray(query)
-		if result:
-			return true # Wall too close!
-	
-	return false
-
-func count_walls_in_radius(
-	world: World2D,
-	point: Vector2,
-	radius: float = 50.0,
-	collision_mask: int = 1,
-	samples: int = 12
-) -> int:
-	"""Count number of walls in radius around a point"""
-	var space_state = world.direct_space_state
-	var count = 0
-	
-	for i in range(samples):
-		var angle = i * TAU / samples
-		var check_point = point + Vector2.from_angle(angle) * radius
-		
-		var query = PhysicsRayQueryParameters2D.create(point, check_point)
-		query.collision_mask = collision_mask
-		query.collide_with_areas = false
-		query.collide_with_bodies = true
-		
-		var result = space_state.intersect_ray(query)
-		if result:
-			count += 1
-	
-	return count
-
-# ============================================
-# TARGETING UTILITIES
-# ============================================
-
-func can_entity_target(attacker: Node, target: Node) -> bool:
-	"""Determine if attacker can target this entity based on group affiliation"""
-	if attacker == target:
-		return false
-	
-	if attacker.is_in_group("Monster"):
-		# Monsters attack Heroes and Mobs (but not other Monsters)
-		if target.is_in_group("Hero"):
-			return true
-		elif target.is_in_group("Enemy") and not target.is_in_group("Monster"):
-			return true # It's a Mob
-	
-	elif attacker.is_in_group("Enemy"):
-		# Mobs attack Heroes and Monsters (but not other Mobs)
-		if target.is_in_group("Hero"):
-			return true
-		elif target.is_in_group("Monster"):
-			return true
-	
-	elif attacker.is_in_group("Hero"):
-		# Heroes attack all enemies (Mobs and Monsters)
-		if target.is_in_group("Enemy"):
-			return true
-	
-	return false
-
-func get_valid_targets_in_area(attacker: Node, detection_area: Area2D) -> Array[Node]:
-	"""Get all valid targets in a detection area for an attacker"""
-	var valid_targets: Array[Node] = []
-	
-	if not is_instance_valid(detection_area):
-		return valid_targets
-	
-	for area in detection_area.get_overlapping_areas():
-		var target_entity = area.get_owner()
-		
-		if not is_instance_valid(target_entity):
+## Returns the closest [Node2D] of a group to [param from_position].
+## [param max_distance] <= 0 means unlimited.
+func find_nearest_in_group(group_name: StringName, from_position: Vector2, max_distance: float = 0.0) -> Node2D:
+	var nearest_node: Node2D = null
+	var nearest_distance_squared: float = INF
+	var max_distance_squared: float = max_distance * max_distance
+	for candidate: Node in get_tree().get_nodes_in_group(group_name):
+		var candidate_2d: Node2D = candidate as Node2D
+		if candidate_2d == null or not candidate_2d.is_inside_tree():
 			continue
-		if target_entity == attacker:
+		var distance_squared: float = from_position.distance_squared_to(candidate_2d.global_position)
+		if max_distance > 0.0 and distance_squared > max_distance_squared:
 			continue
-		
-		if can_entity_target(attacker, target_entity):
-			valid_targets.append(target_entity)
-	
-	return valid_targets
+		if distance_squared < nearest_distance_squared:
+			nearest_distance_squared = distance_squared
+			nearest_node = candidate_2d
+	return nearest_node
 
-func find_nearest_valid_target(attacker: Node, detection_area: Area2D) -> Node:
-	"""Find the closest valid target in a detection area"""
-	var targets = get_valid_targets_in_area(attacker, detection_area)
-	if targets.is_empty():
+
+## Returns every [Node2D] of a group inside a circle.
+func get_group_nodes_in_radius(group_name: StringName, center: Vector2, radius: float) -> Array[Node2D]:
+	var found_nodes: Array[Node2D] = []
+	var radius_squared: float = radius * radius
+	for candidate: Node in get_tree().get_nodes_in_group(group_name):
+		var candidate_2d: Node2D = candidate as Node2D
+		if candidate_2d != null and center.distance_squared_to(candidate_2d.global_position) <= radius_squared:
+			found_nodes.append(candidate_2d)
+	return found_nodes
+
+
+## Finds the first direct child of [param host] that is an instance of [param component_script].
+## Example: [code]Global.find_component(enemy, HealthComponent) as HealthComponent[/code]
+func find_component(host: Node, component_script: Script) -> Node:
+	if host == null:
 		return null
-	
-	var closest: Node = null
-	var closest_dist = INF
-	
-	for target in targets:
-		var dist = attacker.global_position.distance_squared_to(target.global_position)
-		if dist < closest_dist:
-			closest_dist = dist
-			closest = target
-	
-	return closest
+	for child: Node in host.get_children():
+		if is_instance_of(child, component_script):
+			return child
+	return null
+
+
+## Node that runtime spawns (projectiles, pickups, effects) should be parented to.
+## Levels put their World node in [constant Types.GROUP_WORLD_ROOT]; falls back to the current scene.
+func get_world_root() -> Node:
+	var world_root: Node = get_tree().get_first_node_in_group(Types.GROUP_WORLD_ROOT)
+	return world_root if world_root != null else get_tree().current_scene
+
+
+func remove_all_children(parent: Node) -> void:
+	for child: Node in parent.get_children():
+		parent.remove_child(child)
+		child.queue_free()
 
 # ============================================
-# FOG OF WAR UTILITIES
+# GEOMETRY
 # ============================================
 
-func is_position_explored(fog_system: Node, position: Vector2) -> bool:
-	"""Check if a position has been explored (for fog of war systems)"""
-	if not is_instance_valid(fog_system):
-		return false
-	
-	if fog_system.has_method("is_tile_explored"):
-		return fog_system.is_tile_explored(position)
-	
+func random_point_in_ring(center: Vector2, min_radius: float, max_radius: float) -> Vector2:
+	var random_angle: float = randf() * TAU
+	var random_distance: float = randf_range(min_radius, max_radius)
+	return center + Vector2.from_angle(random_angle) * random_distance
+
+
+func random_point_in_rect(area: Rect2) -> Vector2:
+	return Vector2(randf_range(area.position.x, area.end.x), randf_range(area.position.y, area.end.y))
+
+
+## World-space rectangle currently visible through the viewport of [param context].
+func get_visible_world_rect(context: CanvasItem) -> Rect2:
+	var canvas_to_world: Transform2D = context.get_viewport().get_canvas_transform().affine_inverse()
+	var viewport_rect: Rect2 = context.get_viewport_rect()
+	return canvas_to_world * viewport_rect
+
+
+## Converts a screen/touch position into world coordinates of [param context]'s canvas.
+func screen_to_world(context: CanvasItem, screen_position: Vector2) -> Vector2:
+	return context.get_viewport().get_canvas_transform().affine_inverse() * screen_position
+
+
+## Ray-samples around a point to see whether it sits too close to world geometry.
+func is_point_too_close_to_wall(world: World2D, point: Vector2, min_radius: float = 32.0, collision_mask: int = Types.LAYER_WORLD, sample_count: int = 8) -> bool:
+	var space_state: PhysicsDirectSpaceState2D = world.direct_space_state
+	for sample_index: int in sample_count:
+		var sample_offset: Vector2 = Vector2.from_angle(sample_index * TAU / sample_count) * min_radius
+		var query: PhysicsRayQueryParameters2D = PhysicsRayQueryParameters2D.create(point, point + sample_offset, collision_mask)
+		if not space_state.intersect_ray(query).is_empty():
+			return true
 	return false
+
+# ============================================
+# TIME
+# ============================================
+
+## Awaitable delay: [code]await Global.wait(0.5)[/code].
+## [param pausable] = true stops the timer while the tree is paused.
+func wait(seconds: float, pausable: bool = true) -> void:
+	await get_tree().create_timer(seconds, not pausable).timeout
+
+
+func unix_now() -> int:
+	return int(Time.get_unix_time_from_system())
+
+
+## Day number since the unix epoch in local time. Used by daily rewards.
+func local_day_index(unix_time: int) -> int:
+	var timezone_offset_seconds: int = int(Time.get_time_zone_from_system().get("bias", 0)) * 60
+	return floori(float(unix_time + timezone_offset_seconds) / 86400.0)
